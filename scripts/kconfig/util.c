@@ -84,6 +84,7 @@ struct gstr str_new(void)
 	gs.s = xmalloc(sizeof(char) * 64);
 	gs.len = 64;
 	gs.max_width = 0;
+	gs.label_len = 0;
 	strcpy(gs.s, "\0");
 	return gs;
 }

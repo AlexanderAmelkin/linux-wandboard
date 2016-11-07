@@ -120,10 +120,19 @@ struct gstr {
 	size_t len;
 	char  *s;
 	/*
-	* when max_width is not zero long lines in string s (if any) get
-	* wrapped not to exceed the max_width value
-	*/
+	 * when max_width is not zero long lines in string s (if any) get
+	 * wrapped not to exceed the max_width value
+	 */
 	int max_width;
+	/*
+	 * The label for the string. Usually the string is output to the right
+	 * from the label in the same line. The label_len is used to indent
+	 * lines when they are too long and wrapping is required.
+	 *
+	 * Set this property before calling expr_gstr_print() on a gstr if
+	 * a long (wrappable) list of expressions is possible.
+	 */
+	int label_len;
 };
 struct gstr str_new(void);
 void str_free(struct gstr *gs);

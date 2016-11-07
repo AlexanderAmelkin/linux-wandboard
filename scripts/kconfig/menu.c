@@ -629,6 +629,7 @@ static void get_symbol_props_str(struct gstr *r, struct symbol *sym,
 	for_all_properties(sym, prop, tok) {
 		if (!hit) {
 			str_append(r, prefix);
+			r->label_len = strlen(prefix);
 			hit = true;
 		} else
 			str_printf(r, " && ");
@@ -667,7 +668,10 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 		str_printf(r, _("  Defined at %s:%d\n"), prop->menu->file->name,
 			prop->menu->lineno);
 		if (!expr_is_yes(prop->visible.expr)) {
-			str_append(r, _("  Depends on: "));
+			const char *label = _("  Depends on: ");
+
+			r->label_len = strlen(label);
+			str_append(r, label);
 			expr_gstr_print(prop->visible.expr, r);
 			str_append(r, "\n");
 		}
@@ -675,14 +679,20 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 
 	get_symbol_props_str(r, sym, P_SELECT, _("  Selects: "));
 	if (sym->rev_dep.expr) {
-		str_append(r, _("  Selected by: "));
+		const char *label = _("  Selected by: ");
+
+		r->label_len = strlen(label);
+		str_append(r, label);
 		expr_gstr_print(sym->rev_dep.expr, r);
 		str_append(r, "\n");
 	}
 
 	get_symbol_props_str(r, sym, P_IMPLY, _("  Implies: "));
 	if (sym->implied.expr) {
-		str_append(r, _("  Implied by: "));
+		const char *label = _("  Implied by: ");
+
+		r->label_len = strlen(label);
+		str_append(r, label);
 		expr_gstr_print(sym->implied.expr, r);
 		str_append(r, "\n");
 	}
