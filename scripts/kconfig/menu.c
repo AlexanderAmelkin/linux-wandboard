@@ -642,7 +642,10 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 		str_printf(r, _("  Defined at %s:%d\n"), prop->menu->file->name,
 			prop->menu->lineno);
 		if (!expr_is_yes(prop->visible.expr)) {
-			str_append(r, _("  Depends on: "));
+			const char *label = _("  Depends on: ");
+
+			r->label_len = strlen(label);
+			str_append(r, label);
 			expr_gstr_print(prop->visible.expr, r);
 			str_append(r, "\n");
 		}
@@ -651,7 +654,10 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 	hit = false;
 	for_all_properties(sym, prop, P_SELECT) {
 		if (!hit) {
-			str_append(r, "  Selects: ");
+			const char *label = _("  Selects: ");
+
+			r->label_len = strlen(label);
+			str_append(r, label);
 			hit = true;
 		} else
 			str_printf(r, " && ");
@@ -660,7 +666,10 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 	if (hit)
 		str_append(r, "\n");
 	if (sym->rev_dep.expr) {
-		str_append(r, _("  Selected by: "));
+		const char *label = _("  Selected by: ");
+
+		r->label_len = strlen(label);
+		str_append(r, label);
 		expr_gstr_print(sym->rev_dep.expr, r);
 		str_append(r, "\n");
 	}
