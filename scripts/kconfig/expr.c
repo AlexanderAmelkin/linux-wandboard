@@ -1170,6 +1170,27 @@ void expr_fprint(struct expr *e, FILE *out)
 	expr_print(e, expr_print_file_helper, out, E_NONE);
 }
 
+static int str_chrcount(const char *s, char c)
+{
+	int count = 0;
+	const char *p = s;
+
+	while (NULL != (p = strchr(p, c))) {
+		p++;
+		count++;
+	}
+	return count;
+}
+
+static void str_newline_indented(struct gstr *gs)
+{
+	int i;
+
+	str_append(gs, "\\\n");
+	for (i = 0; i < gs->label_len; i++)
+		str_append(gs, " ");
+}
+
 static void expr_print_gstr_helper(void *data, struct symbol *sym, const char *str)
 {
 	struct gstr *gs = (struct gstr*)data;
@@ -1179,25 +1200,36 @@ static void expr_print_gstr_helper(void *data, struct symbol *sym, const char *s
 		sym_str = sym_get_string_value(sym);
 
 	if (gs->max_width) {
-		unsigned extra_length = strlen(str);
+		unsigned int added_length = strlen(str);
 		const char *last_cr = strrchr(gs->s, '\n');
-		unsigned last_line_length;
+		unsigned int this_line_length;
 
 		if (sym_str)
-			extra_length += 4 + strlen(sym_str);
+			added_length += 4 + strlen(sym_str);
 
 		if (!last_cr)
-			last_cr = gs->s;
+			/* Account for the label not included in the first line */
+			this_line_length = strlen(gs->s) + gs->label_len;
+		else
+			/* Subsequent lines already contain the indent inside them */
+			this_line_length = strlen(last_cr + 1);
 
-		last_line_length = strlen(gs->s) - (last_cr - gs->s);
-
-		if ((last_line_length + extra_length) > gs->max_width)
-			str_append(gs, "\\\n");
+		if ((this_line_length + added_length) > gs->max_width)
+			str_newline_indented(gs);
 	}
 
 	str_append(gs, str);
 	if (sym && sym->type != S_UNKNOWN)
 		str_printf(gs, " [=%s]", sym_str);
+
+	/* Break the line on an OR for 'outer' expressions,
+	   don't break inside parentheses. */
+	if (str_chrcount(gs->s, '(') == str_chrcount(gs->s, ')')) {
+		int len = strlen(str);
+
+		if (len >= 4 && !strcmp(str + len - 4, " || "))
+			str_newline_indented(gs);
+	}
 }
 
 void expr_gstr_print(struct expr *e, struct gstr *gs)
