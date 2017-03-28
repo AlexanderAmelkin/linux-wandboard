@@ -1,0 +1,19 @@
+* SPI-based USB host controller Maxim Integrated max3421e
+
+Required properties:
+- compatible: must be "maxim,max3421"
+- reg: chip select number to which the max3421 chip is connected
+  (depends on master SPI controller)
+- spi-max-frequency: the operational frequency, must not exceed <26000000>
+- interrupt-parent: phandle of the associated GPIO controller to which the INT line
+  of max3421e chip is connected
+- interrupts: specification of the GPIO pin (in terms of the `interrupt-parent`)
+  to which INT line of max3421e chip is connected.
+  The driver configures MAX3421E for active low level triggered interrupts.
+  Configure your 'interrupt-parent' gpio controller accordingly.
+- vbus: <GPOUTx ACTIVE_LEVEL>
+  GPOUTx is the number (1-8) of GPOUT pin of max3421e used to drive Vbus.
+  ACTIVE_LEVEL is 1 or 0.
+
+Don't forget to add pinctrl properties if you need some GPIO pins reconfigured
+for use as INT. See binding information for the pinctrl nodes.

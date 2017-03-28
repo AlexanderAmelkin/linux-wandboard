@@ -61,6 +61,12 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
+#if defined(CONFIG_OF)
+#include <linux/of_device.h>
+
+#define MAX3421_GPOUT_COUNT 8
+#endif
+
 #include <linux/platform_data/max3421-hcd.h>
 
 #define DRIVER_DESC	"MAX3421 USB Host-Controller Driver"
@@ -1699,6 +1705,10 @@ max3421_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, u16 index,
 	spin_lock_irqsave(&max3421_hcd->lock, flags);
 
 	pdata = spi->dev.platform_data;
+	if (!pdata) {
+		dev_err(&spi->dev, "Device platform data is missing\n");
+		return -EFAULT;
+	}
 
 	switch (type_req) {
 	case ClearHubFeature:
@@ -1831,20 +1841,80 @@ static struct hc_driver max3421_hcd_desc = {
 	.bus_resume =		max3421_bus_resume,
 };
 
+#if defined(CONFIG_OF)
+static struct max3421_hcd_platform_data max3421_data;
+
+static const struct of_device_id max3421_dt_ids[] = {
+	{ .compatible = "maxim,max3421", .data = &max3421_data, },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, max3421_dt_ids);
+#endif
+
 static int
 max3421_probe(struct spi_device *spi)
 {
 	struct max3421_hcd *max3421_hcd;
 	struct usb_hcd *hcd = NULL;
 	int retval = -ENOMEM;
+#if defined(CONFIG_OF)
+	struct max3421_hcd_platform_data *pdata = NULL;
+#endif
 
 	if (spi_setup(spi) < 0) {
 		dev_err(&spi->dev, "Unable to setup SPI bus");
 		return -EFAULT;
 	}
 
-	hcd = usb_create_hcd(&max3421_hcd_desc, &spi->dev,
-			     dev_name(&spi->dev));
+	if (!spi->irq) {
+		dev_err(&spi->dev, "Failed to get SPI IRQ for node '%s'\n", spi->dev.of_node->full_name);
+		return -EFAULT;
+	}
+
+#if defined(CONFIG_OF)
+	if (spi->dev.of_node) {
+		/* A temporary alias structure */
+		union {
+			uint32_t value[2];
+			struct {
+				uint32_t gpout;
+				uint32_t active_level;
+			};
+		} vbus;
+
+		if(!(pdata = devm_kzalloc(&spi->dev, sizeof(*pdata), GFP_KERNEL))) {
+			dev_err(&spi->dev, "failed to allocate memory for private data\n");
+			retval = -ENOMEM;
+			goto error;
+		}
+		spi->dev.platform_data = pdata;
+
+		if ((retval = of_property_read_u32_array(spi->dev.of_node, "vbus", vbus.value, 2))) {
+			dev_err(&spi->dev, "device tree node property 'vbus' is missing\n");
+			goto error;
+		}
+		pdata->vbus_gpout = vbus.gpout;
+		pdata->vbus_active_level = vbus.active_level;
+	}
+	else
+#endif
+	pdata = spi->dev.platform_data;
+	if (!pdata) {
+		dev_err(&spi->dev, "driver configuration data is not provided\n");
+		retval = -EFAULT;
+		goto error;
+	}
+	if (pdata->vbus_active_level > 1) {
+		dev_err(&spi->dev, "vbus active level value %d is out of range (0/1)\n", pdata->vbus_active_level);
+		retval = -EINVAL;
+		goto error;
+	}
+	if (pdata->vbus_gpout < 1 || pdata->vbus_gpout > MAX3421_GPOUT_COUNT) {
+		dev_err(&spi->dev, "vbus gpout value %d is out of range (1..8)\n", pdata->vbus_gpout);
+		retval = -EINVAL;
+		goto error;
+	}
+	hcd = usb_create_hcd(&max3421_hcd_desc, &spi->dev, dev_name(&spi->dev));
 	if (!hcd) {
 		dev_err(&spi->dev, "failed to create HCD structure\n");
 		goto error;
@@ -1892,6 +1962,12 @@ error:
 			kthread_stop(max3421_hcd->spi_thread);
 		usb_put_hcd(hcd);
 	}
+#if defined(CONFIG_OF)
+	if (pdata && spi->dev.platform_data == pdata) {
+		devm_kfree(&spi->dev, pdata);
+		spi->dev.platform_data = NULL;
+	}
+#endif
 	return retval;
 }
 
@@ -1908,14 +1984,12 @@ max3421_remove(struct spi_device *spi)
 		if (hcd->self.controller == &spi->dev)
 			break;
 	}
+
 	if (!max3421_hcd) {
 		dev_err(&spi->dev, "no MAX3421 HCD found for SPI device %p\n",
 			spi);
 		return -ENODEV;
 	}
-
-	usb_remove_hcd(hcd);
-
 	spin_lock_irqsave(&max3421_hcd->lock, flags);
 
 	kthread_stop(max3421_hcd->spi_thread);
@@ -1923,7 +1997,18 @@ max3421_remove(struct spi_device *spi)
 
 	spin_unlock_irqrestore(&max3421_hcd->lock, flags);
 
+#if defined(CONFIG_OF)
+	if (spi->dev.platform_data) {
+		dev_dbg(&spi->dev, "Freeing platform data structure\n");
+		devm_kfree(&spi->dev, spi->dev.platform_data);
+		spi->dev.platform_data = NULL;
+	}
+#endif
+
 	free_irq(spi->irq, hcd);
+
+	usb_remove_hcd(hcd);
+
 
 	usb_put_hcd(hcd);
 	return 0;
@@ -1934,6 +2019,7 @@ static struct spi_driver max3421_driver = {
 	.remove		= max3421_remove,
 	.driver		= {
 		.name	= "max3421-hcd",
+		.of_match_table = of_match_ptr(max3421_dt_ids),
 	},
 };
 
