@@ -1,0 +1,37 @@
+* SPI-based USB host controller Maxim Integrated max3421e
+
+Required properties:
+- compatible: must be "maxim,max3421"
+- reg: chip select number to which the max3421 chip is connected
+  (depends on master SPI controller)
+- spi-max-frequency: the operational frequency, must not exceed <26000000>
+- interrupt-parent: phandle of the associated GPIO controller to which the INT line
+  of max3421e chip is connected
+- interrupts: specification of the GPIO pin (in terms of the `interrupt-parent`)
+  to which INT line of max3421e chip is connected.
+  The driver configures MAX3421E for active low level triggered interrupts.
+  Configure your 'interrupt-parent' gpio controller accordingly.
+- vbus: <GPOUTx ACTIVE_LEVEL>
+  GPOUTx is the number (1-8) of GPOUT pin of max3421e used to drive Vbus.
+  ACTIVE_LEVEL is 1 or 0.
+
+Optional properties:
+- pinctrl-names
+- pinctrl-0
+  Associated pin control, see binding information for the pinctrl nodes
+
+Not yet implemented but planned properties:
+- gpx-gpio: <gpio_phandle gpio_pin active_level>
+  the phandle of the GPIO controller to which GPX pin of max3421e is connected,
+  the number of gpio pin on the controller to which GPX is connected
+  the active level of GPX pin on the GPIO controller
+- reset-gpio: <gpio_phandle gpio_pin active_level>
+  the phandle of the GPIO controller to which #RES pin of max3421e is connected,
+  the number of gpio pin on the controller to which #RES is connected
+  the active level of #RES pin on the GPIO controller
+- oc-flag (optional): <GPINx ACTIVE_LEVEL>
+  GPINx is the number (1-8) of the GPIN pin of max3421 where the overcurrent flag
+  line is connected (e.g. from max4793 as in max3421evkit-1+ evaluation kit)
+  ACTIVE_LEVEL is 1 or 0
+- gpio-controller: empty property to enable exporting as GPIOs of otherwise
+  unused GPIN and GPOUT pins of max3421e.

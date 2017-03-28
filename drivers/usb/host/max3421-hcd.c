@@ -61,6 +61,10 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
+#if defined(CONFIG_OF)
+#include <linux/of_device.h>
+#endif
+
 #include <linux/platform_data/max3421-hcd.h>
 
 #define DRIVER_DESC	"MAX3421 USB Host-Controller Driver"
@@ -700,8 +704,8 @@ max3421_select_and_start_urb(struct usb_hcd *hcd)
 			urb = list_first_entry(&ep->urb_list, struct urb,
 					       urb_list);
 			if (urb->unlinked) {
-				dev_dbg(&spi->dev, "%s: URB %p unlinked=%d",
-					__func__, urb, urb->unlinked);
+				dev_dbg(&spi->dev, "URB %p unlinked=%d",
+					urb, urb->unlinked);
 				max3421_hcd->curr_urb = urb;
 				max3421_hcd->urb_done = 1;
 				spin_unlock_irqrestore(&max3421_hcd->lock,
@@ -809,8 +813,8 @@ max3421_check_unlink(struct usb_hcd *hcd)
 		list_for_each_entry_safe(urb, next, &ep->urb_list, urb_list) {
 			if (urb->unlinked) {
 				retval = 1;
-				dev_dbg(&spi->dev, "%s: URB %p unlinked=%d",
-					__func__, urb, urb->unlinked);
+				dev_dbg(&spi->dev, "URB %p unlinked=%d",
+					urb, urb->unlinked);
 				usb_hcd_unlink_urb_from_ep(hcd, urb);
 				spin_unlock_irqrestore(&max3421_hcd->lock,
 						       flags);
@@ -906,8 +910,8 @@ max3421_handle_error(struct usb_hcd *hcd, u8 hrsl)
 		 * from; report error
 		 */
 		max3421_hcd->urb_done = hrsl_to_error[result_code];
-		dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-			__func__, hrsl);
+		dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x",
+			hrsl);
 		break;
 
 	case MAX3421_HRSL_TOGERR:
@@ -934,14 +938,12 @@ max3421_handle_error(struct usb_hcd *hcd, u8 hrsl)
 		else {
 			/* Based on ohci.h cc_to_err[]: */
 			max3421_hcd->urb_done = hrsl_to_error[result_code];
-			dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-				__func__, hrsl);
+			dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x", hrsl);
 		}
 		break;
 
 	case MAX3421_HRSL_STALL:
-		dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-			__func__, hrsl);
+		dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x", hrsl);
 		max3421_hcd->urb_done = hrsl_to_error[result_code];
 		break;
 
@@ -1395,6 +1397,7 @@ max3421_spi_thread(void *dev_id)
 	struct max3421_hcd *max3421_hcd = hcd_to_max3421(hcd);
 	int i, i_worked = 1;
 
+	dev_dbg(&spi->dev, "SPI thread started\n");
 	/* set full-duplex SPI mode, low-active interrupt pin: */
 	spi_wr8(hcd, MAX3421_REG_PINCTL,
 		(BIT(MAX3421_PINCTL_FDUPSPI_BIT) |	/* full-duplex */
@@ -1669,20 +1672,29 @@ static void
 max3421_gpout_set_value(struct usb_hcd *hcd, u8 pin_number, u8 value)
 {
 	struct max3421_hcd *max3421_hcd = hcd_to_max3421(hcd);
+	struct spi_device *spi = to_spi_device(hcd->self.controller);
 	u8 mask, idx;
 
 	--pin_number;
+	dev_dbg(&spi->dev, "GPOUT real pin %d <= %d\n", pin_number, value);
 	if (pin_number > 7)
 		return;
 
 	mask = 1u << (pin_number % 4);
 	idx = pin_number / 4;
 
+	dev_dbg(&spi->dev, "GPOUT original iopins %02X  mask %02X idx %d value %02X\n",
+	        max3421_hcd->iopins[idx],
+	        mask, idx, value);
+
 	if (value)
 		max3421_hcd->iopins[idx] |=  mask;
 	else
 		max3421_hcd->iopins[idx] &= ~mask;
+
+	dev_dbg(&spi->dev, "GPOUT new iopins %02X, setting todo UPDATE_IOPINS\n", max3421_hcd->iopins[idx]);
 	set_bit(IOPIN_UPDATE, &max3421_hcd->todo);
+	dev_dbg(&spi->dev, "Waking up SPI thread\n");
 	wake_up_process(max3421_hcd->spi_thread);
 }
 
@@ -1696,9 +1708,20 @@ max3421_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, u16 index,
 	unsigned long flags;
 	int retval = 0;
 
+	dev_dbg(&spi->dev, "hcd %p, type_req 0x%04X, value 0x%04X, index %d, buf %p, length %d\n",
+	       hcd, type_req, value, index, buf, length);
+	dev_dbg(&spi->dev, "spi %p\n", spi);
+
 	spin_lock_irqsave(&max3421_hcd->lock, flags);
 
 	pdata = spi->dev.platform_data;
+	if (!pdata) {
+		dev_err(&spi->dev, "Device platform data is missing\n");
+		return -EFAULT;
+	}
+
+	dev_dbg(&spi->dev, "pdata %p, gpout %d active_level %d\n",
+	        pdata, pdata->vbus_gpout, pdata->vbus_active_level);
 
 	switch (type_req) {
 	case ClearHubFeature:
@@ -1831,20 +1854,89 @@ static struct hc_driver max3421_hcd_desc = {
 	.bus_resume =		max3421_bus_resume,
 };
 
+#if defined(CONFIG_OF)
+static struct max3421_hcd_platform_data max3421_data;
+
+static const struct of_device_id max3421_dt_ids[] = {
+	{ .compatible = "maxim,max3421", .data = &max3421_data, },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, max3421_dt_ids);
+#endif
+
 static int
 max3421_probe(struct spi_device *spi)
 {
 	struct max3421_hcd *max3421_hcd;
 	struct usb_hcd *hcd = NULL;
 	int retval = -ENOMEM;
+#if defined(CONFIG_OF)
+//	const struct of_device_id *of_id = of_match_device(max3421_dt_ids, &spi->dev);
+	struct max3421_hcd_platform_data *pdata = NULL;
+#endif
 
 	if (spi_setup(spi) < 0) {
 		dev_err(&spi->dev, "Unable to setup SPI bus");
 		return -EFAULT;
 	}
 
-	hcd = usb_create_hcd(&max3421_hcd_desc, &spi->dev,
-			     dev_name(&spi->dev));
+	if (!spi->irq) {
+		dev_err(&spi->dev, "Failed to get SPI IRQ for node '%s'\n", spi->dev.of_node->full_name);
+		return -EFAULT;
+	}
+
+	dev_dbg(&spi->dev, "started, irq is %d\n", spi->irq);
+
+#if defined(CONFIG_OF)
+	dev_dbg(&spi->dev, "of_node is %p\n", spi->dev.of_node);
+	if (spi->dev.of_node) {
+		union {
+			uint32_t value[2];
+			struct {
+				uint32_t gpout;
+				uint32_t active_level;
+			};
+		} vbus;
+
+		if(!(pdata = devm_kzalloc(&spi->dev, sizeof(*pdata), GFP_KERNEL))) {
+			dev_err(&spi->dev, "failed to allocate memory for private data\n");
+			retval = -ENOMEM;
+			goto error;
+		}
+		spi->dev.platform_data = pdata;
+
+		if ((retval = of_property_read_u32_array(spi->dev.of_node, "vbus", vbus.value, 2))) {
+			dev_err(&spi->dev, "device tree node property 'vbus' is missing\n");
+			goto error;
+		}
+		if (vbus.gpout < 1 || vbus.gpout > 8) {
+			dev_err(&spi->dev, "vbus gpout value %d is out of range (1..8)\n", vbus.gpout);
+			retval = -EINVAL;
+			goto error;
+		}
+		pdata->vbus_gpout = vbus.gpout;
+
+		if (vbus.active_level > 1) {
+			dev_err(&spi->dev, "vbus active level value %d is out of range (0/1)\n", vbus.active_level);
+			retval = -EINVAL;
+			goto error;
+		}
+		pdata->vbus_active_level = vbus.active_level;
+
+		dev_dbg(&spi->dev, "data set successfully (%hhu, %hhu)\n",
+		        pdata->vbus_gpout, pdata->vbus_active_level);
+	}
+	else
+#endif
+	pdata = spi->dev.platform_data;
+	if (!pdata) {
+		dev_err(&spi->dev, "driver configuration data is not provided\n");
+		retval = -EFAULT;
+		goto error;
+	}
+
+	dev_dbg(&spi->dev, "creating hcd...\n");
+	hcd = usb_create_hcd(&max3421_hcd_desc, &spi->dev, dev_name(&spi->dev));
 	if (!hcd) {
 		dev_err(&spi->dev, "failed to create HCD structure\n");
 		goto error;
@@ -1854,6 +1946,9 @@ max3421_probe(struct spi_device *spi)
 	max3421_hcd->next = max3421_hcd_list;
 	max3421_hcd_list = max3421_hcd;
 	INIT_LIST_HEAD(&max3421_hcd->ep_list);
+	dev_dbg(&spi->dev, "max3421_hcd is at %p, next at %p, list at %p, ep_list (%p, %p)\n",
+			max3421_hcd, max3421_hcd->next, max3421_hcd_list,
+			max3421_hcd->ep_list.prev, max3421_hcd->ep_list.next);
 
 	max3421_hcd->tx = kmalloc(sizeof(*max3421_hcd->tx), GFP_KERNEL);
 	if (!max3421_hcd->tx) {
@@ -1866,6 +1961,7 @@ max3421_probe(struct spi_device *spi)
 		goto error;
 	}
 
+	dev_dbg(&spi->dev, "starting SPI thread\n");
 	max3421_hcd->spi_thread = kthread_run(max3421_spi_thread, hcd,
 					      "max3421_spi_thread");
 	if (max3421_hcd->spi_thread == ERR_PTR(-ENOMEM)) {
@@ -1886,6 +1982,7 @@ max3421_probe(struct spi_device *spi)
 		dev_err(&spi->dev, "failed to request irq %d\n", spi->irq);
 		goto error;
 	}
+	dev_dbg(&spi->dev, "successfull end of probe\n");
 	return 0;
 
 error:
@@ -1896,6 +1993,13 @@ error:
 			kthread_stop(max3421_hcd->spi_thread);
 		usb_put_hcd(hcd);
 	}
+#if defined(CONFIG_OF)
+	if (pdata && spi->dev.platform_data == pdata) {
+		devm_kfree(&spi->dev, pdata);
+		spi->dev.platform_data = NULL;
+	}
+#endif
+	dev_dbg(&spi->dev, "probe failed (retval %d)\n", retval);
 	return retval;
 }
 
@@ -1906,20 +2010,21 @@ max3421_remove(struct spi_device *spi)
 	struct usb_hcd *hcd = NULL;
 	unsigned long flags;
 
+	dev_dbg(&spi->dev, "Searching for HCD\n");
 	for (prev = &max3421_hcd_list; *prev; prev = &(*prev)->next) {
 		max3421_hcd = *prev;
 		hcd = max3421_to_hcd(max3421_hcd);
 		if (hcd->self.controller == &spi->dev)
 			break;
 	}
+
 	if (!max3421_hcd) {
 		dev_err(&spi->dev, "no MAX3421 HCD found for SPI device %p\n",
 			spi);
 		return -ENODEV;
 	}
-
-	usb_remove_hcd(hcd);
-
+	
+	dev_dbg(&spi->dev, "Stopping SPI thread\n");
 	spin_lock_irqsave(&max3421_hcd->lock, flags);
 
 	kthread_stop(max3421_hcd->spi_thread);
@@ -1927,7 +2032,19 @@ max3421_remove(struct spi_device *spi)
 
 	spin_unlock_irqrestore(&max3421_hcd->lock, flags);
 
+#if defined(CONFIG_OF)
+	if (spi->dev.platform_data) {
+		dev_dbg(&spi->dev, "Freeing platform data structure\n");
+		devm_kfree(&spi->dev, spi->dev.platform_data);
+		spi->dev.platform_data = NULL;
+	}
+#endif
+
 	free_irq(spi->irq, hcd);
+
+	dev_dbg(&spi->dev, "Removing HCD\n");
+	usb_remove_hcd(hcd);
+
 
 	usb_put_hcd(hcd);
 	return 0;
@@ -1938,6 +2055,7 @@ static struct spi_driver max3421_driver = {
 	.remove		= max3421_remove,
 	.driver		= {
 		.name	= "max3421-hcd",
+		.of_match_table = of_match_ptr(max3421_dt_ids),
 	},
 };
 
