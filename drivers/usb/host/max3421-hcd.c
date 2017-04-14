@@ -1925,10 +1925,10 @@ max3421_probe(struct spi_device *spi)
 	max3421_hcd_list = max3421_hcd;
 	INIT_LIST_HEAD(&max3421_hcd->ep_list);
 
-	max3421_hcd->tx = kmalloc(sizeof(*max3421_hcd->tx), GFP_KERNEL);
+	max3421_hcd->tx = devm_kzalloc(&spi->dev, sizeof(*max3421_hcd->tx), GFP_KERNEL);
 	if (!max3421_hcd->tx)
 		goto error;
-	max3421_hcd->rx = kmalloc(sizeof(*max3421_hcd->rx), GFP_KERNEL);
+	max3421_hcd->rx = devm_kzalloc(&spi->dev, sizeof(*max3421_hcd->rx), GFP_KERNEL);
 	if (!max3421_hcd->rx)
 		goto error;
 
@@ -1946,8 +1946,8 @@ max3421_probe(struct spi_device *spi)
 		goto error;
 	}
 
-	retval = request_irq(spi->irq, max3421_irq_handler,
-			     IRQF_TRIGGER_LOW, "max3421", hcd);
+	retval = devm_request_irq(&spi->dev, spi->irq, max3421_irq_handler,
+	                          IRQF_TRIGGER_LOW, "max3421", hcd);
 	if (retval < 0) {
 		dev_err(&spi->dev, "failed to request irq %d\n", spi->irq);
 		goto error;
@@ -1976,7 +1976,6 @@ max3421_remove(struct spi_device *spi)
 {
 	struct max3421_hcd *max3421_hcd = NULL, **prev;
 	struct usb_hcd *hcd = NULL;
-	unsigned long flags;
 
 	for (prev = &max3421_hcd_list; *prev; prev = &(*prev)->next) {
 		max3421_hcd = *prev;
@@ -1990,12 +1989,20 @@ max3421_remove(struct spi_device *spi)
 			spi);
 		return -ENODEV;
 	}
-	spin_lock_irqsave(&max3421_hcd->lock, flags);
+
+	devm_free_irq(&spi->dev, spi->irq, hcd);
+
+	usb_remove_hcd(hcd);
 
 	kthread_stop(max3421_hcd->spi_thread);
-	*prev = max3421_hcd->next;
 
-	spin_unlock_irqrestore(&max3421_hcd->lock, flags);
+	devm_kfree(&spi->dev, max3421_hcd->rx);
+	max3421_hcd->rx = NULL;
+	devm_kfree(&spi->dev, max3421_hcd->tx);
+	max3421_hcd->tx = NULL;
+
+	*prev = max3421_hcd->next;
+	usb_put_hcd(hcd);
 
 #if defined(CONFIG_OF)
 	if (spi->dev.platform_data) {
@@ -2005,12 +2012,6 @@ max3421_remove(struct spi_device *spi)
 	}
 #endif
 
-	free_irq(spi->irq, hcd);
-
-	usb_remove_hcd(hcd);
-
-
-	usb_put_hcd(hcd);
 	return 0;
 }
 
