@@ -706,8 +706,8 @@ max3421_select_and_start_urb(struct usb_hcd *hcd)
 			urb = list_first_entry(&ep->urb_list, struct urb,
 					       urb_list);
 			if (urb->unlinked) {
-				dev_dbg(&spi->dev, "%s: URB %p unlinked=%d",
-					__func__, urb, urb->unlinked);
+				dev_dbg(&spi->dev, "URB %p unlinked=%d",
+					urb, urb->unlinked);
 				max3421_hcd->curr_urb = urb;
 				max3421_hcd->urb_done = 1;
 				spin_unlock_irqrestore(&max3421_hcd->lock,
@@ -815,8 +815,8 @@ max3421_check_unlink(struct usb_hcd *hcd)
 		list_for_each_entry_safe(urb, next, &ep->urb_list, urb_list) {
 			if (urb->unlinked) {
 				retval = 1;
-				dev_dbg(&spi->dev, "%s: URB %p unlinked=%d",
-					__func__, urb, urb->unlinked);
+				dev_dbg(&spi->dev, "URB %p unlinked=%d",
+					urb, urb->unlinked);
 				usb_hcd_unlink_urb_from_ep(hcd, urb);
 				spin_unlock_irqrestore(&max3421_hcd->lock,
 						       flags);
@@ -912,8 +912,8 @@ max3421_handle_error(struct usb_hcd *hcd, u8 hrsl)
 		 * from; report error
 		 */
 		max3421_hcd->urb_done = hrsl_to_error[result_code];
-		dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-			__func__, hrsl);
+		dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x",
+			hrsl);
 		break;
 
 	case MAX3421_HRSL_TOGERR:
@@ -940,14 +940,12 @@ max3421_handle_error(struct usb_hcd *hcd, u8 hrsl)
 		else {
 			/* Based on ohci.h cc_to_err[]: */
 			max3421_hcd->urb_done = hrsl_to_error[result_code];
-			dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-				__func__, hrsl);
+			dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x", hrsl);
 		}
 		break;
 
 	case MAX3421_HRSL_STALL:
-		dev_dbg(&spi->dev, "%s: unexpected error HRSL=0x%02x",
-			__func__, hrsl);
+		dev_dbg(&spi->dev, "unexpected error HRSL=0x%02x", hrsl);
 		max3421_hcd->urb_done = hrsl_to_error[result_code];
 		break;
 
